@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="style.css">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&display=swap" rel="stylesheet">
+</head>
+<body>
+<div id="notify-container"></div>
+<!-- TAXIMETER -->
+<div id="taximeter">
+    <div class="meter-shell">
+        <div class="taxi-topbar">
+            <div class="meter-badge">CITY CAB</div>
+            <div class="taxi-title">TAXOMETER</div>
+            <div class="status-wrap">
+                <span class="status-text">LIVE</span>
+                <div id="taxi-status"></div>
+            </div>
+        </div>
+
+        <div class="display">
+            <div class="fare-panel">
+                <div class="fare-header">
+                    <span class="label">FARE</span>
+                    <span class="mini-chip">METERED</span>
+                </div>
+                <div id="fare">$0.00</div>
+            </div>
+
+            <div class="meter-grid">
+                <div class="meter-card">
+                    <span class="label">TODAY</span>
+                    <span id="today">$0</span>
+                </div>
+                <div class="meter-card">
+                    <span class="label">RIDES</span>
+                    <span id="rides">0</span>
+                </div>
+                <div class="meter-card">
+                    <span class="label">DIST</span>
+                    <span id="distance">0.00 km</span>
+                </div>
+                <div class="meter-card">
+                    <span class="label">TIME</span>
+                    <span id="time">00:00</span>
+                </div>
+                <div class="meter-card meter-card-wide">
+                    <span class="label">RATING</span>
+                    <span id="rating">0%</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+<!--END-->
+<script src="script.js"></script>
+
+</body>
+</html>
