@@ -4,9 +4,11 @@ local taxiVeh = nil
 local activeJob = false
 local jobBlip = nil
 local customerPed = nil
+local customerPeds = {}
 local spawningVehicle = false
 local jobAccepted = false
 local pendingPickup = nil
+local pendingPassengerCount = 1
 local jobTimeout = nil
 local wrongWayTime = 0
 local jobAcceptTime = nil
@@ -145,6 +147,35 @@ local function ResetRating()
     UpdateRatingUI()
     PersistRating()
 end
+
+local function GetActiveCustomerPeds()
+    local activePeds = {}
+    for _, ped in ipairs(customerPeds) do
+        if ped and DoesEntityExist(ped) then
+            activePeds[#activePeds + 1] = ped
+        end
+    end
+    customerPeds = activePeds
+    customerPed = customerPeds[1] or nil
+    return activePeds
+end
+
+local function GetPassengerCountForRide()
+    local passengers = GetActiveCustomerPeds()
+    return math.max(1, #passengers)
+end
+
+local function ClearCustomerPeds(shouldDelete)
+    local passengers = GetActiveCustomerPeds()
+    for _, ped in ipairs(passengers) do
+        if shouldDelete and DoesEntityExist(ped) then
+            DeletePed(ped)
+        end
+    end
+
+    customerPeds = {}
+    customerPed = nil
+end
 --------------------------------------------------
 --  SEATING ARRANGEMENT TEST
 --------------------------------------------------
@@ -184,12 +215,21 @@ RegisterNetEvent("npcTaxi:setRating", function(rating)
     UpdateRatingUI()
 end)
 
+RegisterNetEvent("npcTaxi:setShiftStats", function(todayMoney, rides)
+    SendNUIMessage({
+        action = "setShiftStats",
+        today = math.max(0, tonumber(todayMoney) or 0),
+        rides = math.max(0, tonumber(rides) or 0)
+    })
+end)
+
 RegisterNetEvent("npcTaxi:jobApplicationResult", function(success)
     if success then
         acceptJobRequested = false
         employmentTerminated = false
         terminationVehicle = nil
         cleanRideStreak = 0
+        TriggerServerEvent("npcTaxi:requestShiftStats")
         TaxiNotify(_U("welcomeToTaxicompany"))
         PlaySoundFrontend(-1, "Text_Arrive_Tone", "Phone_SoundSet_Default", true)
         return
@@ -279,6 +319,7 @@ CreateThread(function()
     Wait(2000)
     UpdateRatingUI()
     TriggerServerEvent("npcTaxi:requestRating")
+    TriggerServerEvent("npcTaxi:requestShiftStats")
     if TaxiLocations.Debug and TaxiLocations.Debug.Enabled then
         ShowDebugLocations()
     else
@@ -591,9 +632,6 @@ RegisterNetEvent("npcTaxi:storeVehicle", function()
                 taxiVeh = nil
                 ResetTaximeter()
                 StopTaximeter()
-                SendNUIMessage({
-                    action = "resetShift"
-                })
                 NotifyTaxi(_U("vehicleParked"))
                 return
             end
@@ -617,6 +655,10 @@ CreateThread(function()
         local PlayerData = QBCore.Functions.GetPlayerData()
         if PlayerData and PlayerData.job and PlayerData.job.name == Config.Job.Name and PlayerData.job.onduty and not activeJob and not jobAccepted then
             local pickup = TaxiLocations.Pickups[math.random(#TaxiLocations.Pickups)]
+            local passengerCount = 1
+            if (Config.Passengers.MaxCount or 1) > 1 and math.random(1, 100) <= (Config.Passengers.DoublePassengerChance or 0) then
+                passengerCount = math.min(Config.Passengers.MaxCount or 1, 2)
+            end
             local dist = #(GetEntityCoords(ped) - pickup.xyz)
             PlaySoundFrontend(-1, "Text_Arrive_Tone", "Phone_SoundSet_Default", true)
             NotifyTaxi(_U("newOrder", math.floor(dist)) .. " " .._U("pressKey", Config.Keys.AcceptJobLabel))
@@ -634,6 +676,7 @@ CreateThread(function()
             if accepted then
                 jobAccepted = true
                 pendingPickup = pickup
+                pendingPassengerCount = passengerCount
                 jobAcceptTime = GetGameTimer()
                 jobTimeout = GetGameTimer() + maxRideTime
                 NotifyTaxi(_U("jobAccepted"))
@@ -661,6 +704,7 @@ CreateThread(function()
             if GetGameTimer() > jobTimeout then
                 jobAccepted = false
                 pendingPickup = nil
+                pendingPassengerCount = 1
                 jobTimeout = nil
                 NotifyTaxi(_U("orderAutoCanceled"))
                 PlaySoundFrontend(-1, "Mission_Pass_Notify", "DLC_HEISTS_GENERAL_FRONTEND_SOUNDS", true)
@@ -675,8 +719,9 @@ CreateThread(function()
         if jobAccepted and pendingPickup then
             local ped = PlayerPedId()
             if IsPedInVehicle(ped, taxiVeh, false) then
-                StartTaxiJob(pendingPickup)
+                StartTaxiJob(pendingPickup, pendingPassengerCount or 1)
                 pendingPickup = nil
+                pendingPassengerCount = 1
                 jobAccepted = false
             end
         end
@@ -727,6 +772,7 @@ CreateThread(function()
             if elapsed > 120 then
                 jobAccepted = false
                 pendingPickup = nil
+                pendingPassengerCount = 1
                 jobAcceptTime = nil
                 NotifyTaxi(_U("timeLimitExceeded"))
                 PlaySoundFrontend(-1, "Mission_Pass_Notify", "DLC_HEISTS_GENERAL_FRONTEND_SOUNDS", true)
@@ -780,7 +826,7 @@ end)
 -------------------------------------------------
 -- START JOB
 -------------------------------------------------
-function StartTaxiJob(coords)
+function StartTaxiJob(coords, passengerCount)
     if activeJob then
         print("Job already active → blocked")
         return
@@ -795,7 +841,7 @@ function StartTaxiJob(coords)
     SetBlipColour(jobBlip, 5)
     SetBlipScale(jobBlip, 0.8)
     SetBlipRoute(jobBlip, true)
-    SpawnCustomer(coords)
+    SpawnCustomer(coords, passengerCount or 1)
     end
 -------------------------------------------------
 -- CUSTOMER SPAWN
@@ -883,6 +929,136 @@ end
 -- =========================================
 -- NPC COMPLAINS WHEN TAKING DAMAGE
 -- =========================================
+function SpawnCustomer(coords, passengerCount)
+    if not activeJob then return end
+
+    ClearCustomerPeds(true)
+    pickupTimer = GetGameTimer()
+
+    local x, y, z, w = coords.x, coords.y, coords.z, coords.w or 0.0
+    local found, groundZ = GetGroundZFor_3dCoord(x, y, z, w)
+    if found then
+        z = groundZ + 1.0
+    end
+
+    local requestedPassengerCount = math.max(1, math.min(passengerCount or 1, Config.Passengers.MaxCount or 1))
+    for index = 1, requestedPassengerCount do
+        local model = CustomerModels[math.random(#CustomerModels)]
+        RequestModel(model)
+        while not HasModelLoaded(model) do Wait(0) end
+
+        local spawnOffset = GetOffsetFromCoordAndHeadingInWorldCoords(x, y, z, w, 0.0, (index - 1) * 1.2, 0.0)
+        local spawnedPed = CreatePed(0, model, spawnOffset.x, spawnOffset.y, spawnOffset.z, w, true, false)
+        if not spawnedPed or spawnedPed == 0 then
+            print("NPC Spawn FAILED")
+            ClearCustomerPeds(true)
+            ResetTaxiJob()
+            return
+        end
+
+        SetEntityHeading(spawnedPed, w)
+        customerPeds[#customerPeds + 1] = spawnedPed
+        SetModelAsNoLongerNeeded(model)
+    end
+
+    customerPed = customerPeds[1]
+
+    CreateThread(function()
+        local waved = false
+        while activeJob and #GetActiveCustomerPeds() > 0 do
+            Wait(1000)
+            local ped = PlayerPedId()
+            local targetCoords = vector3(coords.x, coords.y, coords.z)
+            local dist = #(GetEntityCoords(ped) - targetCoords)
+
+            if dist < 30.0 and not waved then
+                waved = true
+                RequestAnimDict("friends@frj@ig_1")
+                while not HasAnimDictLoaded("friends@frj@ig_1") do Wait(0) end
+                for _, passengerPed in ipairs(GetActiveCustomerPeds()) do
+                    TaskPlayAnim(passengerPed, "friends@frj@ig_1", "wave_a", 8.0, -8.0, -1, 49, 0, false, false, false)
+                end
+            end
+
+            if dist < Config.NPC.ApproachRadius then
+                local passengers = GetActiveCustomerPeds()
+                if #passengers == 0 then
+                    ResetTaxiJob()
+                    return
+                end
+
+                for _, passengerPed in ipairs(passengers) do
+                    ClearPedTasks(passengerPed)
+                    TaskGoToEntity(passengerPed, taxiVeh, -1, 3.0, 1.0, 0, 0)
+                end
+
+                Wait(2000)
+                passengers = GetActiveCustomerPeds()
+                if #passengers == 0 then
+                    ResetTaxiJob()
+                    return
+                end
+
+                local configuredSeats = Config.Passengers.Seats or { 1, 2 }
+                for index, passengerPed in ipairs(passengers) do
+                    local seat = configuredSeats[index] or index
+                    TaskEnterVehicle(passengerPed, taxiVeh, -1, seat, 1.0, 1, 0)
+                end
+
+                local enterDeadline = GetGameTimer() + Config.NPC.EnterVehicleTimeout
+                while true do
+                    local allBoarded = true
+                    passengers = GetActiveCustomerPeds()
+
+                    if #passengers == 0 then
+                        allBoarded = false
+                    end
+
+                    for _, passengerPed in ipairs(passengers) do
+                        if not IsPedInVehicle(passengerPed, taxiVeh, false) then
+                            allBoarded = false
+                            break
+                        end
+                    end
+
+                    if allBoarded then
+                        break
+                    end
+
+                    if GetGameTimer() > enterDeadline then
+                        RemoveRating(Config.Rating.Remove.NpcEnterFail)
+                        CancelTaxiJob()
+                        return
+                    end
+
+                    Wait(500)
+                end
+
+                customerPed = customerPeds[1]
+                npcPassenger = true
+                TriggerServerEvent("npcTaxi:startRide", GetPassengerCountForRide())
+
+                CreateThread(function()
+                    Wait(1000)
+                    if customerPed and DoesEntityExist(customerPed) then
+                        PlayPedAmbientSpeechNative(customerPed, "GENERIC_HI", "SPEECH_PARAMS_FORCE")
+                    end
+                end)
+
+                StartTaximeter()
+                SendNUIMessage({
+                    action = "startTimer"
+                })
+                pickupTimer = nil
+                pickupWarning = false
+                StartTaximeter()
+                StartDestinations(coords.xyz)
+                break
+            end
+        end
+    end)
+end
+
 CreateThread(function()
     local lastEngine = 1000
     local lastBody = 1000
@@ -1042,6 +1218,120 @@ end
 end
 end)
 end
+function StartDestinations(pickupCoords)
+    lastDistance = nil
+    wrongWayTimer = 0
+    if not pickupCoords then return end
+
+    local dest
+    local distanceToDestination = 0
+    local pickupVec = vector3(pickupCoords.x, pickupCoords.y, pickupCoords.z)
+
+    repeat
+        dest = TaxiLocations.Destinations[math.random(#TaxiLocations.Destinations)]
+        distanceToDestination = #(pickupVec - dest.coords)
+    until distanceToDestination >= 1000.0 and distanceToDestination <= 5000.0
+
+    if jobBlip then
+        RemoveBlip(jobBlip)
+        jobBlip = nil
+    end
+
+    destinationCoords = dest.coords
+    destinationText = dest.text
+    NotifyTaxi(_U("driveTo", dest.name))
+    jobBlip = AddBlipForCoord(dest.coords.x, dest.coords.y, dest.coords.z)
+    SetBlipRoute(jobBlip, true)
+
+    CreateThread(function()
+        while activeJob do
+            Wait(1000)
+            local ped = PlayerPedId()
+            if #(GetEntityCoords(ped) - vector3(dest.coords.x, dest.coords.y, dest.coords.z)) < Config.Payout.CompletionRadius then
+                NotifyTaxi(_U("customerStopHere"))
+                Wait(5000)
+
+                local ridePassengers = GetActiveCustomerPeds()
+                customerPed = ridePassengers[1]
+
+                if customerPed and DoesEntityExist(customerPed) then
+                    PlayPedAmbientSpeechNative(customerPed, "GENERIC_THANKS", "SPEECH_PARAMS_FORCE")
+                end
+
+                local price = math.floor(currentFare)
+                TriggerServerEvent("npcTaxi:completeRide", price)
+
+                if jobBlip then
+                    RemoveBlip(jobBlip)
+                    jobBlip = nil
+                end
+
+                npcPassenger = false
+                SendNUIMessage({
+                    action = "stopTimer"
+                })
+                ResetTaximeter()
+                Wait(2000)
+
+                if customerPed and DoesEntityExist(customerPed) then
+                    PlayPedAmbientSpeechNative(customerPed, "GENERIC_BYE", "SPEECH_PARAMS_FORCE")
+                end
+
+                if taxiVeh then
+                    for _, passengerPed in ipairs(ridePassengers) do
+                        if passengerPed and DoesEntityExist(passengerPed) then
+                            TaskLeaveVehicle(passengerPed, taxiVeh, 0)
+                        end
+                    end
+                end
+
+                Wait(1000)
+                if taxiVeh and DoesEntityExist(taxiVeh) then
+                    for doorIndex = 1, 3 do
+                        if GetVehicleDoorAngleRatio(taxiVeh, doorIndex) > 0.1 then
+                            SetVehicleDoorShut(taxiVeh, doorIndex, false)
+                        end
+                    end
+                end
+
+                AddRating(Config.Rating.Add.FinishRide)
+                RegisterCleanRide()
+
+                for index, passengerPed in ipairs(ridePassengers) do
+                    if passengerPed and DoesEntityExist(passengerPed) then
+                        local sideOffset = -4.5
+                        local forwardOffset = -6.0 - index
+                        local walkAway = GetOffsetFromEntityInWorldCoords(taxiVeh, sideOffset, forwardOffset, 0.0)
+                        TaskGoStraightToCoord(passengerPed, walkAway.x, walkAway.y, walkAway.z, 1.0, -1, 0.0, 0.0)
+                    end
+                end
+
+                Wait(5000)
+
+                for _, passengerPed in ipairs(ridePassengers) do
+                    if passengerPed and DoesEntityExist(passengerPed) then
+                        TaskStartScenarioInPlace(passengerPed, "WORLD_HUMAN_STAND_MOBILE", 0, true)
+                        FreezeEntityPosition(passengerPed, true)
+                    end
+                end
+
+                local pedsToDelete = ridePassengers
+                ResetTaxiJob()
+
+                SetTimeout(45000, function()
+                    for _, pedToDelete in ipairs(pedsToDelete) do
+                        if pedToDelete and DoesEntityExist(pedToDelete) then
+                            DeletePed(pedToDelete)
+                        end
+                    end
+                end)
+
+                break
+            end
+        end
+    end)
+end
+
 --NPC Reset Funktion
 function ResetTaxiJob()
     TriggerServerEvent("npcTaxi:cancelRide")
@@ -1111,6 +1401,57 @@ function CancelTaxiJob()
         RemoveBlip(jobBlip)
         jobBlip = nil
     end
+    ResetTaxiJob()
+    ResetTaximeter()
+    StopTaximeter()
+end
+
+function ResetTaxiJob()
+    TriggerServerEvent("npcTaxi:cancelRide")
+    if jobBlip then
+        RemoveBlip(jobBlip)
+        jobBlip = nil
+    end
+
+    ClearCustomerPeds(false)
+    npcPassenger = false
+    SendNUIMessage({
+        action = "stopTimer"
+    })
+    ResetTaximeter()
+    destinationCoords = nil
+    pendingPickup = nil
+    pendingPassengerCount = 1
+    activeJob = false
+    jobAccepted = false
+    pickupTimer = nil
+    pickupWarning = false
+    jobTimeout = nil
+    jobAcceptTime = nil
+    idleTimer = 0
+    idleComplaintCount = 0
+    wrongWayTimer = 0
+    lastDistance = nil
+end
+
+function CancelTaxiJob()
+    local passengers = GetActiveCustomerPeds()
+    for _, passengerPed in ipairs(passengers) do
+        if passengerPed and DoesEntityExist(passengerPed) then
+            TaskLeaveVehicle(passengerPed, taxiVeh, 0)
+        end
+    end
+
+    if #passengers > 0 then
+        Wait(2000)
+        ClearCustomerPeds(true)
+    end
+
+    if jobBlip then
+        RemoveBlip(jobBlip)
+        jobBlip = nil
+    end
+
     ResetTaxiJob()
     ResetTaximeter()
     StopTaximeter()

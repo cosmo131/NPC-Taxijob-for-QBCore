@@ -93,8 +93,12 @@ if(event.data.action === "hideQB"){
         event.data.distance.toFixed(2) + " km"
     }
     if(event.data.action === "rideFinished"){
-        todayMoney += event.data.amount
-        rides++
+        document.getElementById("today").innerHTML = "$" + todayMoney
+        document.getElementById("rides").innerHTML = rides
+    }
+    if(event.data.action === "setShiftStats"){
+        todayMoney = Math.max(0, Number(event.data.today) || 0)
+        rides = Math.max(0, Number(event.data.rides) || 0)
         document.getElementById("today").innerHTML = "$" + todayMoney
         document.getElementById("rides").innerHTML = rides
     }

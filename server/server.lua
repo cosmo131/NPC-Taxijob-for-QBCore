@@ -34,6 +34,21 @@ local function clearRide(src)
     activeRides[src] = nil
 end
 
+local function ensureShiftStatsTable()
+    MySQL.query.await([[
+        CREATE TABLE IF NOT EXISTS npc_taxi_shift_stats (
+            citizenid VARCHAR(50) NOT NULL PRIMARY KEY,
+            today_money INT NOT NULL DEFAULT 0,
+            rides INT NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        )
+    ]])
+end
+
+local function clearShiftStatsTable()
+    MySQL.query.await("DELETE FROM npc_taxi_shift_stats")
+end
+
 local function ensureRatingTable()
     MySQL.query.await([[
         CREATE TABLE IF NOT EXISTS npc_taxi_ratings (
@@ -76,8 +91,39 @@ local function loadPlayerRating(player)
     return Config.Rating.Start
 end
 
+local function getShiftStats(player)
+    local citizenId = getCitizenId(player)
+    if not citizenId then
+        return 0, 0
+    end
+
+    local row = MySQL.single.await("SELECT today_money, rides FROM npc_taxi_shift_stats WHERE citizenid = ?", { citizenId })
+    if row then
+        return tonumber(row.today_money) or 0, tonumber(row.rides) or 0
+    end
+
+    return 0, 0
+end
+
+local function saveShiftStats(player, todayMoney, rides)
+    local citizenId = getCitizenId(player)
+    if not citizenId then return end
+
+    MySQL.insert.await(
+        "INSERT INTO npc_taxi_shift_stats (citizenid, today_money, rides) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE today_money = VALUES(today_money), rides = VALUES(rides)",
+        { citizenId, math.max(0, math.floor(todayMoney or 0)), math.max(0, math.floor(rides or 0)) }
+    )
+end
+
+local function sendShiftStats(src, player)
+    local todayMoney, rides = getShiftStats(player)
+    TriggerClientEvent("npcTaxi:setShiftStats", src, todayMoney, rides)
+end
+
 CreateThread(function()
     ensureRatingTable()
+    ensureShiftStatsTable()
+    clearShiftStatsTable()
 end)
 
 RegisterNetEvent("npcTaxi:checkLicense", function(vehicle)
@@ -95,7 +141,7 @@ RegisterNetEvent("npcTaxi:checkLicense", function(vehicle)
     TriggerClientEvent("npcTaxi:licenseResult", src, hasLicense, vehicle)
 end)
 
-RegisterNetEvent("npcTaxi:startRide", function()
+RegisterNetEvent("npcTaxi:startRide", function(passengerCount)
     local src = source
     local player = getPlayer(src)
     if not isTaxiDriverOnDuty(player) then
@@ -103,8 +149,11 @@ RegisterNetEvent("npcTaxi:startRide", function()
         return
     end
 
+    local normalizedPassengerCount = math.max(1, math.min(Config.Passengers.MaxCount or 1, tonumber(passengerCount) or 1))
+
     activeRides[src] = {
-        startedAt = os.time()
+        startedAt = os.time(),
+        passengerCount = normalizedPassengerCount
     }
 end)
 
@@ -122,6 +171,17 @@ RegisterNetEvent("npcTaxi:requestRating", function()
 
     local rating = loadPlayerRating(player)
     TriggerClientEvent("npcTaxi:setRating", src, rating)
+end)
+
+RegisterNetEvent("npcTaxi:requestShiftStats", function()
+    local src = source
+    local player = getPlayer(src)
+    if not player or not player.PlayerData.job or player.PlayerData.job.name ~= Config.Job.Name then
+        TriggerClientEvent("npcTaxi:setShiftStats", src, 0, 0)
+        return
+    end
+
+    sendShiftStats(src, player)
 end)
 
 RegisterNetEvent("npcTaxi:updateRating", function(rating)
@@ -166,13 +226,23 @@ RegisterNetEvent("npcTaxi:completeRide", function(amount)
     local tip = 0
     if math.random(1, 100) <= Config.Tips.ChancePercent then
         tip = math.random(Config.Tips.MinAmount, Config.Tips.MaxAmount)
+        local passengerCount = ride.passengerCount or 1
+        if passengerCount > 1 then
+            local multiplier = 1 + ((passengerCount - 1) * (Config.Tips.ExtraPassengerMultiplier or 0))
+            tip = math.max(1, math.floor(tip * multiplier))
+        end
     end
 
     local total = fare + tip
     player.Functions.AddMoney(Config.Payout.Account, total)
+    local todayMoney, rides = getShiftStats(player)
+    todayMoney = todayMoney + fare
+    rides = rides + 1
+    saveShiftStats(player, todayMoney, rides)
     clearRide(src)
 
     TriggerClientEvent("npcTaxi:ridePaid", src, fare, tip)
+    TriggerClientEvent("npcTaxi:setShiftStats", src, todayMoney, rides)
 end)
 
 -- NPC Calls the Police (RP Feature)
@@ -199,6 +269,7 @@ RegisterNetEvent('QBCore:Server:OnPlayerLoaded', function()
 
         local rating = loadPlayerRating(player)
         TriggerClientEvent("npcTaxi:setRating", src, rating)
+        sendShiftStats(src, player)
     end
 end)
 ------------------------------------------------------
@@ -216,6 +287,7 @@ RegisterNetEvent("npcTaxi:setJob", function()
         player.Functions.SetJob(Config.Job.Name, Config.Job.Grade or 0)
         savePlayerRating(player, Config.Rating.Start)
         TriggerClientEvent("npcTaxi:setRating", src, Config.Rating.Start)
+        sendShiftStats(src, player)
         TriggerClientEvent("npcTaxi:jobApplicationResult", src, true)
     end
 end)

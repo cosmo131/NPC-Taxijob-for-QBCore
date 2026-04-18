@@ -114,7 +114,7 @@ body{
     grid-template-columns:auto 1fr auto;
     gap:12px;
     align-items:center;
-    padding:14px 16px 12px;
+    padding:11px 16px 9px;
     background:
         linear-gradient(180deg, rgba(255, 197, 51, 0.95) 0%, rgba(217, 151, 0, 0.95) 100%);
     border-bottom:1px solid rgba(0,0,0,0.35);
@@ -164,7 +164,7 @@ body{
 
 .display{
     position:relative;
-    padding:16px;
+    padding:12px;
     font-family:'Share Tech Mono', monospace;
     background:
         linear-gradient(180deg, rgba(8,8,8,0.96) 0%, rgba(0,0,0,0.98) 100%);
@@ -172,8 +172,8 @@ body{
 
 .fare-panel{
     position:relative;
-    padding:16px 18px 14px;
-    margin-bottom:14px;
+    padding:12px 16px 10px;
+    margin-bottom:10px;
     border-radius:18px;
     background:
         linear-gradient(180deg, rgba(21, 21, 21, 0.96) 0%, rgba(7, 7, 7, 0.98) 100%);
@@ -197,14 +197,15 @@ body{
     display:flex;
     justify-content:space-between;
     align-items:center;
-    margin-bottom:8px;
+    margin-bottom:5px;
 }
 
 .label{
     color:#8e8e8e;
-    font-size:12px;
+    font-size:11px;
     letter-spacing:2px;
     text-transform:uppercase;
+    line-height:1;
 }
 
 .mini-chip{
@@ -220,7 +221,7 @@ body{
 
 #fare{
     color:#ff533d;
-    font-size:52px;
+    font-size:48px;
     line-height:1;
     letter-spacing:4px;
     text-shadow:
@@ -232,12 +233,12 @@ body{
 .meter-grid{
     display:grid;
     grid-template-columns:repeat(2, minmax(0, 1fr));
-    gap:10px;
+    gap:8px;
 }
 
 .meter-card{
-    min-height:52px;
-    padding:8px 11px;
+    min-height:44px;
+    padding:6px 10px;
     border-radius:16px;
     background:
         linear-gradient(180deg, rgba(30, 30, 30, 0.92) 0%, rgba(10, 10, 10, 0.96) 100%);
@@ -248,7 +249,7 @@ body{
     display:flex;
     flex-direction:column;
     justify-content:space-between;
-    gap:2px;
+    gap:1px;
 }
 
 .meter-card-wide{
@@ -258,7 +259,7 @@ body{
 #today,
 #rides{
     color:#86ffc7;
-    font-size:21px;
+    font-size:19px;
     letter-spacing:2px;
     text-shadow:
         0 0 6px rgba(105, 255, 190, 0.45),
@@ -269,7 +270,7 @@ body{
 #time,
 #rating{
     color:#f7f2d4;
-    font-size:18px;
+    font-size:16px;
     letter-spacing:2px;
     text-shadow:0 0 8px rgba(255,255,255,0.08);
 }
@@ -287,7 +288,7 @@ body{
     }
 
     #fare{
-        font-size:46px;
+        font-size:42px;
     }
 }
 
@@ -307,10 +308,10 @@ body{
     }
 
     #fare{
-        font-size:40px;
+        font-size:36px;
     }
 
     .meter-card{
-        min-height:48px;
+        min-height:42px;
     }
 }

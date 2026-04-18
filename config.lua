@@ -68,7 +68,15 @@ Config.Tips = {
     ChancePercent = 30,
     MinAmount = 5,
     MaxAmount = 15,
-    DelayMs = 5000
+    DelayMs = 5000,
+    ExtraPassengerMultiplier = 0.5
+}
+
+-- NPC passenger setup
+Config.Passengers = {
+    MaxCount = 2,
+    DoublePassengerChance = 35,
+    Seats = { 1, 2 }
 }
 
 -- Rating system
